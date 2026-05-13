@@ -1,0 +1,725 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>香炉山隧洞4#5#主洞变形监测总看板</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/tabulator-tables@5.4.4/dist/js/tabulator.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+    <link href="https://cdn.jsdelivr.net/npm/tabulator-tables@5.4.4/dist/css/tabulator.min.css" rel="stylesheet">
+    <style>
+        *{margin:0;padding:0;box-sizing:border-box;font-family:"Microsoft YaHei",sans-serif;}
+        :root{--bg:#f5f7fa;--card:#fff;--text:#2c3e50;--text2:#7f8c8d;--blue:#3498db;--red:#e74c3c;--green:#27ae60;--shadow:0 4px 12px rgba(0,0,0,0.1);}
+        html,body{height:100%;overflow-y:auto;background:var(--bg);color:var(--text);padding:10px;}
+        .page{display:flex;flex-direction:column;gap:10px;min-height:100%;}
+        .toolbar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;font-size:12px;padding:8px;background:var(--card);border-radius:6px;box-shadow:var(--shadow);}
+        button{padding:6px 12px;border:none;border-radius:4px;background:var(--blue);color:#fff;font-size:12px;cursor:pointer;}
+        button:hover{opacity:0.9;}
+        input,select{padding:5px 8px;border-radius:4px;border:1px solid #ddd;width:90px;font-size:12px;}
+        .header{text-align:center;font-size:13px;}
+        .header h2{font-size:18px;margin-bottom:4px;font-weight:600;}
+        .cards{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;}
+        .card{background:var(--card);padding:12px 15px;border-radius:8px;box-shadow:var(--shadow);border-left:4px solid var(--blue);font-size:12px;}
+        .card h3{color:var(--text2);margin-bottom:6px;font-size:11px;font-weight:500;}
+        .card.warn{border-left-color:var(--red);}
+        .card .num{font-size:20px;font-weight:bold;color:var(--text);}
+        .chart-box{background:var(--card);padding:20px;border-radius:12px;box-shadow:0 4px 12px rgba(0,0,0,0.1);}
+        .chart-title{font-size:14px;margin-bottom:12px;color:var(--text);font-weight:600;}
+        canvas{max-height:170px !important;}
+        
+        #table{
+            background:var(--card);
+            border-radius:8px;
+            font-size:11px;
+            height:100%;
+            overflow:hidden;
+        }
+
+        #sectionChartBox, #sectionDayChartBox{
+            height:100%;
+            display:flex;
+            flex-direction:column;
+        }
+        .section-tool{
+            display:flex;
+            justify-content:space-between;
+            align-items:center;
+            margin-bottom:6px;
+        }
+        #sectionSelect{
+            width:120px;
+        }
+
+        .warn{color:var(--red) !important;font-weight:bold;}
+        .safe{color:var(--green) !important;font-weight:bold;}
+        .alert{background:#fff3cd;color:#856404;padding:6px 12px;border-radius:4px;font-size:12px;display:none;margin:0;}
+        @media print{.toolbar,.alert{display:none !important;}.chart-box,.card,.geometry-box{box-shadow:none;border:1px solid #ccc;}}
+    </style>
+</head>
+<body>
+<div class="page">
+    <div class="header">
+        <h2>香炉山隧洞4#5#主洞变形监测总看板</h2>
+        <p>日期：<span id="show-date">2026-04-23</span></p>
+    </div>
+
+    <div class="toolbar">
+        <button id="export">📄 导出Excel</button>
+        <button id="print">🖨️ 打印</button>
+        <button id="full">🖵 全屏</button>
+        <span>安全阈值：<input type="number" id="safeLimit" value="2.0" style="width:60px"></span>
+        <span>预警阈值：<input type="number" id="warnLimit" value="3.0" style="width:60px"></span>
+        <span>高危阈值：<input type="number" id="dangerLimit" value="10.0" style="width:60px"></span>
+        <span>日期：<input type="date" id="dateSel" style="width:120px;"></span>
+    </div>
+
+    <div class="alert" id="alert">⚠ 存在断面超阈值，请立即核查！</div>
+
+    <div class="cards">
+        <div class="card"><h3>断面总数</h3><div class="num" id="c1">-</div></div>
+        <div class="card"><h3>最大日变形</h3><div class="num warn" id="c2">-</div></div>
+        <div class="card"><h3>最大累计变形</h3><div class="num warn" id="c3">-</div></div>
+        <div class="card warn"><h3>最高风险断面</h3><div class="num warn" id="c4">-</div></div>
+    </div>
+
+    <!-- 累计变形趋势 -->
+    <div class="chart-box" style="height:240px;"><div class="chart-title">累计变形趋势(mm)</div><canvas id="chart1"></canvas></div>
+
+    <!-- 日变形对比 -->
+    <div class="chart-box" style="height:240px;"><div class="chart-title">日变形对比(mm)</div><canvas id="chart2"></canvas></div>
+
+    <!-- 数据表格 -->
+    <div class="chart-box" style="height:200px;">
+        <div class="chart-title">监测数据表格</div>
+        <div id="table" style="height:calc(100% - 40px);"></div>
+    </div>
+
+    <!-- 断面图表区域 -->
+    <div style="display: flex; gap: 12px;">
+        <div class="chart-box" style="height:220px; flex:1;" id="sectionChartBox">
+            <div class="chart-title">断面累计变形(mm)</div>
+            <canvas id="sectionChart"></canvas>
+        </div>
+        <div class="chart-box" style="height:220px; flex:1;" id="sectionDayChartBox">
+            <div class="chart-title">断面日变形(mm)</div>
+            <canvas id="sectionDayChart"></canvas>
+        </div>
+    </div>
+
+    <!-- 断面选择（统一控制） -->
+    <div class="chart-box" style="padding:10px;">
+        <div style="display:flex; justify-content:center; align-items:center; gap:10px;">
+            <span style="font-size:13px;">选择断面：</span>
+            <select id="sectionSelect" style="width:120px;"></select>
+        </div>
+    </div>
+
+    <!-- 监测结论 -->
+    <div class="chart-box" style="padding:20px;">
+        <div class="chart-title">📋 监测结论</div>
+        
+        <!-- 阈值设置区域 -->
+        <div style="margin-bottom:15px; padding-bottom:15px; border-bottom:1px solid #eee;">
+            <div style="font-size:12px; font-weight:bold; margin-bottom:8px; color:#666;">阈值设置（单位：mm）</div>
+            <div style="display:flex; flex-wrap:wrap; gap:15px; font-size:12px;">
+                <span>日变形关注阈值：<input type="number" id="trendThreshold" value="5" style="width:50px; padding:2px; text-align:center;"></span>
+                <span>日变形预警阈值：<input type="number" id="warnThreshold" value="10" style="width:50px; padding:2px; text-align:center;"></span>
+                <span>日变形高危阈值：<input type="number" id="dangerThreshold" value="15" style="width:50px; padding:2px; text-align:center;"></span>
+                <span>累计预警阈值：<input type="number" id="accWarnThreshold" value="500" style="width:60px; padding:2px; text-align:center;"></span>
+                <span>累计高危阈值：<input type="number" id="accDangerThreshold" value="700" style="width:60px; padding:2px; text-align:center;"></span>
+                <button id="applyThreshold" style="padding:2px 8px; font-size:11px;">应用</button>
+            </div>
+        </div>
+        
+        <div id="conclusion" style="font-size:13px; line-height:1.8;">
+            <div style="margin-bottom:10px;"><strong>1. 总体状况：</strong><span id="concl-1">加载中...</span></div>
+            <div style="margin-bottom:10px;"><strong>2. 重点关注断面：</strong><span id="concl-2">加载中...</span></div>
+            <div><strong>3. 变形趋势：</strong><span id="concl-3">加载中...</span></div>
+        </div>
+    </div>
+</div>
+
+<script>
+// 已内置你上传的全部10份PDF监测数据
+const allData = {
+    "2026-04-11": [
+        {section:"DLI27+765",current:10.68,line:"D-E",accumulate:78.66},
+        {section:"DLI27+775",current:19.96,line:"D-E",accumulate:153.89},
+        {section:"DLI27+785",current:10.73,line:"D-E",accumulate:125.04},
+        {section:"DLI27+790",current:5.42,line:"D-E",accumulate:40.17},
+        {section:"DLI24+265",current:12.08,line:"D-E",accumulate:519.43},
+        {section:"DLI24+257",current:8.07,line:"D-E",accumulate:442.61},
+        {section:"DLI24+240",current:13.89,line:"D-E",accumulate:453.68},
+        {section:"DLI24+180",current:14.06,line:"D-E",accumulate:207.1},
+        {section:"DLI24+175",current:17.44,line:"D-E",accumulate:302.69},
+        {section:"DLI24+165",current:17.13,line:"D-E",accumulate:190.55},
+        {section:"DLI24+160",current:16.68,line:"D-E",accumulate:293.41},
+        {section:"DLI24+140",current:19.32,line:"D-E",accumulate:706.35},
+        {section:"DLI24+135",current:11.99,line:"D-E",accumulate:672.48},
+        {section:"DLI24+130",current:9.63,line:"D-E",accumulate:740.08},
+        {section:"DLI24+090",current:11.88,line:"D-E",accumulate:170.36},
+        {section:"DLI24+085",current:8.73,line:"D-E",accumulate:149.73},
+    ],
+    "2026-04-12": [
+        {section:"DLI27+765",current:6.86,line:"D-E",accumulate:85.52},
+        {section:"DLI27+775",current:12.86,line:"D-E",accumulate:166.75},
+        {section:"DLI27+785",current:5.37,line:"D-E",accumulate:130.41},
+        {section:"DLI24+150",current:4.47,line:"D-E",accumulate:544.59},
+        {section:"DLI24+145",current:2.73,line:"D-E",accumulate:736.06},
+        {section:"DLI24+140",current:6.39,line:"D-E",accumulate:712.74},
+        {section:"DLI24+135",current:2.76,line:"D-E",accumulate:675.24},
+        {section:"DLI24+130",current:6.13,line:"D-E",accumulate:746.21},
+        {section:"DLI24+125",current:7.07,line:"D-E",accumulate:471.98},
+    ],
+    "2026-04-13": [
+        {section:"DLI27+765",current:2.37,line:"D-E",accumulate:87.89},
+        {section:"DLI27+775",current:1.77,line:"D-E",accumulate:168.52},
+        {section:"DLI27+785",current:2.34,line:"D-E",accumulate:132.75},
+    ],
+    "2026-04-15": [
+        {section:"DLI27+765",current:23.48,line:"D-E",accumulate:111.37},
+        {section:"DLI27+775",current:14.52,line:"D-E",accumulate:183.04},
+        {section:"DLI27+785",current:4.76,line:"D-E",accumulate:137.51},
+        {section:"DLI27+805",current:3.86,line:"D-E",accumulate:25.4},
+        {section:"DLI27+815",current:4.84,line:"D-E",accumulate:26.65},
+    ],
+    "2026-04-16": [
+        {section:"DLI24+265",current:4.72,line:"D-E",accumulate:524.46},
+        {section:"DLI24+257",current:5.09,line:"D-E",accumulate:454.13},
+        {section:"DLI24+240",current:8.54,line:"D-E",accumulate:468.76},
+        {section:"DLI24+210",current:2.64,line:"D-E",accumulate:347.83},
+        {section:"DLI24+180",current:3.51,line:"D-E",accumulate:213.73},
+        {section:"DLI24+175",current:16.54,line:"D-E",accumulate:319.23},
+        {section:"DLI24+165",current:13.86,line:"D-E",accumulate:204.41},
+        {section:"DLI24+160",current:12.95,line:"D-E",accumulate:306.36},
+        {section:"DLI24+150",current:13.56,line:"D-E",accumulate:558.15},
+        {section:"DLI24+145",current:15.08,line:"D-E",accumulate:751.14},
+        {section:"DLI24+140",current:17.82,line:"D-E",accumulate:730.56},
+        {section:"DLI24+135",current:2.44,line:"D-E",accumulate:677.68},
+        {section:"DLI24+130",current:19.8,line:"D-E",accumulate:766.01},
+        {section:"DLI24+125",current:17.93,line:"D-E",accumulate:489.91},
+        {section:"DLI24+120",current:2.27,line:"D-E",accumulate:239.71},
+        {section:"DLI24+115",current:21.36,line:"D-E",accumulate:209.25},
+        {section:"DLI24+110",current:19.27,line:"D-E",accumulate:195.84},
+        {section:"DLI24+105",current:16.98,line:"D-E",accumulate:205.19},
+        {section:"DLI24+100",current:18.17,line:"D-E",accumulate:210.29},
+        {section:"DLI24+095",current:13.19,line:"D-E",accumulate:183.12},
+    ],
+    "2026-04-17": [
+        {section:"DLI24+150",current:2.39,line:"D-E",accumulate:560.54},
+        {section:"DLI24+145",current:3.37,line:"D-E",accumulate:754.51},
+        {section:"DLI24+140",current:5.89,line:"D-E",accumulate:736.45},
+        {section:"DLI24+135",current:4.6,line:"D-E",accumulate:682.28},
+        {section:"DLI24+130",current:3.82,line:"D-E",accumulate:769.83},
+        {section:"DLI24+125",current:3.04,line:"D-E",accumulate:492.95},
+        {section:"DLI24+100",current:2.57,line:"D-E",accumulate:212.86},
+        {section:"DLI24+095",current:7.96,line:"D-E",accumulate:191.08},
+        {section:"DLI24+090",current:18.57,line:"D-E",accumulate:188.93},
+        {section:"DLI24+085",current:19.83,line:"D-E",accumulate:169.56},
+    ],
+    "2026-04-21": [
+        {section:"DLI27+765",current:5.36,line:"D-E",accumulate:147.06},
+        {section:"DLI27+775",current:3.52,line:"D-E",accumulate:192.94},
+        {section:"DLI27+785",current:1.54,line:"D-E",accumulate:143.74},
+        {section:"DLI27+815",current:1.08,line:"D-E",accumulate:29.05},
+        {section:"DLI27+825",current:1.38,line:"D-E",accumulate:57.78},
+    ],
+    "2026-04-22": [
+        {section:"DLI24+150",current:4.53,line:"D-E",accumulate:571.19},
+        {section:"DLI24+145",current:6.41,line:"D-E",accumulate:768.4},
+        {section:"DLI24+140",current:4.39,line:"D-E",accumulate:745.49},
+        {section:"DLI24+135",current:6.72,line:"D-E",accumulate:698.04},
+        {section:"DLI24+130",current:6.52,line:"D-E",accumulate:785.33},
+        {section:"DLI24+125",current:5.43,line:"D-E",accumulate:506.25},
+        {section:"DLI24+120",current:5.41,line:"D-E",accumulate:253.29},
+    ],
+    "2026-04-23": [
+        {section:"DLI24+265",current:4.0,line:"D-E",accumulate:531.57},
+        {section:"DLI24+257",current:2.75,line:"D-E",accumulate:462.95},
+        {section:"DLI24+150",current:3.13,line:"D-E",accumulate:574.32},
+        {section:"DLI24+145",current:2.87,line:"D-E",accumulate:771.27},
+        {section:"DLI24+140",current:3.47,line:"D-E",accumulate:748.96},
+        {section:"DLI24+135",current:2.63,line:"D-E",accumulate:700.67},
+        {section:"DLI24+130",current:3.45,line:"D-E",accumulate:788.78},
+        {section:"DLI24+125",current:2.93,line:"D-E",accumulate:509.18},
+        {section:"DLI24+120",current:1.8,line:"D-E",accumulate:255.09},
+    ],
+    "2026-04-25": [
+        {section:"DLI24+257",current:5.61,line:"D-E",accumulate:468.56},
+        {section:"DLI24+240",current:6.74,line:"D-E",accumulate:483.9},
+        {section:"DLI24+150",current:5.05,line:"D-E",accumulate:579.37},
+        {section:"DLI24+145",current:5.58,line:"D-E",accumulate:776.85},
+        {section:"DLI24+140",current:7.03,line:"D-E",accumulate:755.99},
+        {section:"DLI24+135",current:7.75,line:"D-E",accumulate:708.42},
+        {section:"DLI24+130",current:7.34,line:"D-E",accumulate:796.12},
+        {section:"DLI24+125",current:6.04,line:"D-E",accumulate:515.22},
+        {section:"DLI24+120",current:6.55,line:"D-E",accumulate:261.64},
+        {section:"DLI24+115",current:6.03,line:"D-E",accumulate:225.88},
+        {section:"DLI24+110",current:5.47,line:"D-E",accumulate:213.72},
+        {section:"DLI24+105",current:5.67,line:"D-E",accumulate:215.4},
+    ],
+    "2026-04-28": [
+        {section:"DLI24+265",current:6.95,line:"D-E",accumulate:542.37},
+        {section:"DLI24+257",current:9.77,line:"D-E",accumulate:481.84},
+        {section:"DLI24+240",current:7.81,line:"D-E",accumulate:495.0},
+        {section:"DLI24+175",current:5.57,line:"D-E",accumulate:340.29},
+        {section:"DLI24+165",current:5.27,line:"D-E",accumulate:225.62},
+        {section:"DLI24+160",current:5.77,line:"D-E",accumulate:328.66},
+        {section:"DLI24+150",current:6.1,line:"D-E",accumulate:588.72},
+        {section:"DLI24+145",current:5.3,line:"D-E",accumulate:784.59},
+        {section:"DLI24+140",current:7.34,line:"D-E",accumulate:767.03},
+        {section:"DLI24+135",current:7.43,line:"D-E",accumulate:719.23},
+        {section:"DLI24+130",current:8.85,line:"D-E",accumulate:807.96},
+        {section:"DLI24+125",current:8.32,line:"D-E",accumulate:526.21},
+        {section:"DLI24+120",current:6.88,line:"D-E",accumulate:270.93},
+        {section:"DLI24+115",current:6.64,line:"D-E",accumulate:234.7},
+        {section:"DLI24+110",current:6.46,line:"D-E",accumulate:222.26},
+        {section:"DLI24+105",current:6.19,line:"D-E",accumulate:221.8},
+        {section:"DLI24+100",current:5.49,line:"D-E",accumulate:234.79},
+        {section:"DLI24+095",current:5.47,line:"D-E",accumulate:209.68},
+    ],
+    "2026-04-30": [
+        {section:"DLI24+085",current:2.63,line:"D-E",accumulate:184.51},
+        {section:"DLI24+080",current:1.59,line:"D-E",accumulate:164.07},
+        {section:"DLI24+075",current:1.58,line:"D-E",accumulate:172.67},
+        {section:"DLI24+070",current:1.53,line:"D-E",accumulate:170.62},
+        {section:"DLI24+065",current:1.52,line:"D-E",accumulate:139.0},
+        {section:"DLI24+060",current:1.89,line:"D-E",accumulate:193.12},
+        {section:"DLI24+055",current:1.89,line:"D-E",accumulate:184.87},
+        {section:"DLI24+050",current:4.83,line:"D-E",accumulate:381.56},
+        {section:"DLI24+040",current:9.56,line:"D-E",accumulate:317.9},
+        {section:"DLI24+030",current:3.86,line:"D-E",accumulate:306.74},
+    ],
+    "2026-05-04": [
+        {section:"DLI24+270",current:15.07,line:"D-E",accumulate:583.01},
+        {section:"DLI24+265",current:12.83,line:"D-E",accumulate:582.44},
+        {section:"DLI24+240",current:12.51,line:"D-E",accumulate:540.01},
+        {section:"DLI24+175",current:5.64,line:"D-E",accumulate:351.2},
+        {section:"DLI24+165",current:6.73,line:"D-E",accumulate:236.91},
+        {section:"DLI24+160",current:7.1,line:"D-E",accumulate:341.28},
+        {section:"DLI24+150",current:7.81,line:"D-E",accumulate:602.89},
+        {section:"DLI24+145",current:8.84,line:"D-E",accumulate:799.85},
+        {section:"DLI24+140",current:9.4,line:"D-E",accumulate:782.52},
+        {section:"DLI24+135",current:4.56,line:"D-E",accumulate:734.6},
+        {section:"DLI24+130",current:4.12,line:"D-E",accumulate:819.49},
+        {section:"DLI27+765",current:5.24,line:"D-E",accumulate:181.38},
+        {section:"DLI27+805",current:4.52,line:"D-E",accumulate:48.96},
+        {section:"DLI27+815",current:10.12,line:"D-E",accumulate:39.72},
+        {section:"DLI27+825",current:20.31,line:"D-E",accumulate:92.6},
+    ],
+    "2026-05-05": [
+        {section:"DLI24+270",current:6.83,line:"D-E",accumulate:588.07},
+        {section:"DLI24+265",current:6.74,line:"D-E",accumulate:587.52},
+        {section:"DLI24+240",current:6.45,line:"D-E",accumulate:546.46},
+        {section:"DLI24+210",current:1.54,line:"D-E",accumulate:363.1},
+        {section:"DLI24+180",current:1.36,line:"D-E",accumulate:233.65},
+        {section:"DLI24+175",current:2.06,line:"D-E",accumulate:353.26},
+        {section:"DLI24+165",current:3.16,line:"D-E",accumulate:240.07},
+        {section:"DLI24+160",current:3.22,line:"D-E",accumulate:344.5},
+    ],
+    "2026-05-06": [
+        {section:"DLI27+755",current:13.64,line:"D-E",accumulate:34.57},
+        {section:"DLI27+765",current:11.46,line:"D-E",accumulate:192.84},
+        {section:"DLI27+775",current:17.54,line:"D-E",accumulate:215.23},
+        {section:"DLI27+785",current:4.28,line:"D-E",accumulate:152.29},
+        {section:"DLI27+795",current:1.53,line:"D-E",accumulate:55.43},
+        {section:"DLI27+805",current:3.72,line:"D-E",accumulate:51.71},
+        {section:"DLI27+815",current:5.76,line:"D-E",accumulate:45.48},
+        {section:"DLI27+825",current:8.64,line:"D-E",accumulate:101.24},
+        {section:"DLI24+270",current:24.31,line:"D-E",accumulate:609.79},
+        {section:"DLI24+265",current:18.68,line:"D-E",accumulate:601.59},
+        {section:"DLI24+240",current:11.76,line:"D-E",accumulate:558.22},
+        {section:"DLI24+210",current:0.45,line:"D-E",accumulate:363.55},
+        {section:"DLI24+180",current:0.43,line:"D-E",accumulate:234.01},
+        {section:"DLI24+175",current:10.47,line:"D-E",accumulate:363.73},
+        {section:"DLI24+165",current:3.85,line:"D-E",accumulate:243.92},
+        {section:"DLI24+160",current:2.58,line:"D-E",accumulate:347.08},
+        {section:"DLI24+150",current:7.35,line:"D-E",accumulate:610.24},
+        {section:"DLI24+145",current:7.65,line:"D-E",accumulate:807.5},
+        {section:"DLI24+140",current:8.39,line:"D-E",accumulate:790.91},
+        {section:"DLI24+135",current:10.11,line:"D-E",accumulate:744.71},
+        {section:"DLI24+130",current:9.82,line:"D-E",accumulate:829.31},
+        {section:"DLI24+125",current:17.81,line:"D-E",accumulate:548.5},
+        {section:"DLI24+120",current:15.11,line:"D-E",accumulate:293.2},
+        {section:"DLI24+115",current:12.02,line:"D-E",accumulate:251.14},
+        {section:"DLI24+110",current:10.7,line:"D-E",accumulate:237.94},
+        {section:"DLI24+105",current:6.99,line:"D-E",accumulate:231.59},
+        {section:"DLI24+100",current:9.0,line:"D-E",accumulate:246.19},
+        {section:"DLI24+095",current:9.07,line:"D-E",accumulate:222.39},
+        {section:"DLI24+090",current:6.38,line:"D-E",accumulate:208.86},
+        {section:"DLI24+085",current:3.96,line:"D-E",accumulate:192.69},
+        {section:"DLI24+080",current:4.96,line:"D-E",accumulate:167.02},
+    ],
+    "2026-05-07": [
+        {section:"DLI27+755",current:1.92,line:"D-E",accumulate:35.88},
+        {section:"DLI27+765",current:5.24,line:"D-E",accumulate:198.08},
+        {section:"DLI27+775",current:10.31,line:"D-E",accumulate:223.92},
+        {section:"DLI27+785",current:7.39,line:"D-E",accumulate:157.95},
+        {section:"DLI27+795",current:4.66,line:"D-E",accumulate:22.28},
+        {section:"DLI27+805",current:11.96,line:"D-E",accumulate:60.39},
+        {section:"DLI27+815",current:5.27,line:"D-E",accumulate:49.63},
+        {section:"DLI27+825",current:5.71,line:"D-E",accumulate:106.95},
+        {section:"DLI24+270",current:18.93,line:"D-E",accumulate:626.54},
+        {section:"DLI24+265",current:13.37,line:"D-E",accumulate:613.13},
+        {section:"DLI24+240",current:8.8,line:"D-E",accumulate:567.02},
+        {section:"DLI24+210",current:1.48,line:"D-E",accumulate:365.03},
+    ],
+    "2026-05-08": [
+        {section:"DLI27+755",current:5.24,line:"D-E",accumulate:41.12},
+        {section:"DLI27+765",current:4.86,line:"D-E",accumulate:202.94},
+        {section:"DLI27+775",current:8.99,line:"D-E",accumulate:230.45},
+        {section:"DLI27+785",current:4.6,line:"D-E",accumulate:161.67},
+        {section:"DLI27+795",current:0.69,line:"D-E",accumulate:22.97},
+        {section:"DLI27+805",current:4.21,line:"D-E",accumulate:63.56},
+        {section:"DLI27+815",current:10.39,line:"D-E",accumulate:57.87},
+        {section:"DLI27+825",current:10.52,line:"D-E",accumulate:117.47},
+        {section:"DLI27+835",current:11.08,line:"D-E",accumulate:43.59},
+        {section:"DLI24+270",current:25.04,line:"D-E",accumulate:650.4},
+        {section:"DLI24+265",current:20.76,line:"D-E",accumulate:631.99},
+        {section:"DLI24+259",current:16.68,line:"D-E",accumulate:535.0},
+        {section:"DLI24+240",current:7.67,line:"D-E",accumulate:574.69},
+        {section:"DLI24+085",current:1.98,line:"D-E",accumulate:196.33},
+        {section:"DLI24+080",current:1.98,line:"D-E",accumulate:168.61},
+        {section:"DLI24+075",current:1.93,line:"D-E",accumulate:176.12},
+        {section:"DLI24+070",current:3.85,line:"D-E",accumulate:173.53},
+        {section:"DLI24+065",current:1.09,line:"D-E",accumulate:141.87},
+        {section:"DLI24+060",current:0.42,line:"D-E",accumulate:196.25},
+        {section:"DLI24+055",current:3.73,line:"D-E",accumulate:190.87},
+        {section:"DLI24+050",current:0.74,line:"D-E",accumulate:385.46},
+        {section:"DLI24+040",current:6.31,line:"D-E",accumulate:321.68},
+        {section:"DLI24+030",current:2.37,line:"D-E",accumulate:311.28},
+    ],
+    "2026-05-09": [
+        {section:"DLI27+755",current:10.82,line:"D-E",accumulate:51.94},
+        {section:"DLI27+765",current:9.74,line:"D-E",accumulate:212.68},
+        {section:"DLI27+775",current:9.07,line:"D-E",accumulate:237.2},
+        {section:"DLI27+815",current:8.52,line:"D-E",accumulate:65.83},
+        {section:"DLI24+240",current:8.37,line:"D-E",accumulate:583.06},
+        {section:"DLI24+210",current:1.37,line:"D-E",accumulate:392.84},
+    ],
+    "2026-05-10": [
+        {section:"DLI27+765",current:6.83,line:"D-E",accumulate:219.51},
+        {section:"DLI27+775",current:6.72,line:"D-E",accumulate:242.44},
+        {section:"DLI27+785",current:5.35,line:"D-E",accumulate:170.37},
+        {section:"DLI27+815",current:10.3,line:"D-E",accumulate:71.63},
+    ],
+    "2026-05-11": [
+        {section:"DLI24+175",current:14.61,line:"D-E",accumulate:378.34},
+        {section:"DLI24+160",current:14.18,line:"D-E",accumulate:361.26},
+        {section:"DLI24+150",current:16.01,line:"D-E",accumulate:626.25},
+        {section:"DLI24+140",current:20.68,line:"D-E",accumulate:811.59},
+        {section:"DLI24+130",current:23.38,line:"D-E",accumulate:852.69},
+        {section:"DLI27+755",current:5.22,line:"D-E",accumulate:57.16},
+        {section:"DLI27+785",current:3.59,line:"D-E",accumulate:173.68},
+        {section:"DLI27+815",current:7.6,line:"D-E",accumulate:78.68},
+        {section:"DLI27+825",current:4.78,line:"D-E",accumulate:132.43},
+    ],
+    "2026-05-12": [
+        {section:"DLI24+258",current:9.59,line:"D-E",accumulate:57.69},
+        {section:"DLI24+240",current:6.54,line:"D-E",accumulate:593.41},
+        {section:"DLI24+150",current:3.21,line:"D-E",accumulate:629.46},
+        {section:"DLI27+745",current:6.68,line:"D-E",accumulate:36.54},
+        {section:"DLI27+755",current:7.02,line:"D-E",accumulate:64.18},
+        {section:"DLI27+765",current:7.49,line:"D-E",accumulate:226.82},
+        {section:"DLI27+805",current:4.12,line:"D-E",accumulate:74.68},
+        {section:"DLI27+815",current:8.25,line:"D-E",accumulate:86.39},
+        {section:"DLI27+825",current:16.64,line:"D-E",accumulate:147.94},
+    ],
+};
+
+// ========== 关键修改1：获取allData最后一个日期 ==========
+// 提取所有日期并排序
+const allDates = Object.keys(allData).sort((a, b) => new Date(a) - new Date(b));
+// 取最后一个日期作为默认日期
+const defaultDate = allDates[allDates.length - 1];
+
+const dateSel = document.getElementById('dateSel');
+const sectionSel = document.getElementById('sectionSelect');
+// 设置日期输入框的默认值和范围
+const minDate = allDates[0];
+const maxDate = allDates[allDates.length - 1];
+dateSel.value = defaultDate;
+dateSel.min = minDate;
+dateSel.max = maxDate;
+
+let chart1, chart2, sectionChart, sectionDayChart, table;
+
+// 获取所有不重复断面
+function getAllSections(){
+    const sections = new Set();
+    for(let d in allData){
+        allData[d].forEach(item=>sections.add(item.section));
+    }
+    return Array.from(sections).sort();
+}
+
+// 绘制单个断面历史趋势
+function renderSectionChart(sec){
+    if(!sec) return;
+    const dates = Object.keys(allData).sort();
+    const values = [];
+    dates.forEach(d=>{
+        const item = allData[d].find(x=>x.section===sec);
+        values.push(item ? item.accumulate : null);
+    });
+
+    if(sectionChart) sectionChart.destroy();
+    const ctx = document.getElementById('sectionChart').getContext('2d');
+    sectionChart = new Chart(ctx,{
+        type:'line',
+        data:{
+            labels:dates,
+            datasets:[{
+                label:sec+' 累计变形',
+                data:values,
+                borderColor:'#8e44ad',
+                backgroundColor:'rgba(142,68,173,0.1)',
+                fill:true,
+                tension:0.2
+            }]
+        },
+        options:{
+            responsive:true,
+            maintainAspectRatio:false,
+            plugins:{legend:{display:false}}
+        }
+    });
+}
+
+// 绘制单个断面日变形趋势
+function renderSectionDayChart(sec){
+    if(!sec) return;
+    const dates = Object.keys(allData).sort();
+    const values = [];
+    dates.forEach(d=>{
+        const item = allData[d].find(x=>x.section===sec);
+        values.push(item ? item.current : null);
+    });
+
+    if(sectionDayChart) sectionDayChart.destroy();
+    const ctx = document.getElementById('sectionDayChart').getContext('2d');
+    sectionDayChart = new Chart(ctx,{
+        type:'line',
+        data:{
+            labels:dates,
+            datasets:[{
+                label:sec+' 日变形',
+                data:values,
+                borderColor:'#3498db',
+                backgroundColor:'rgba(52,152,219,0.1)',
+                fill:true,
+                tension:0.2
+            }]
+        },
+        options:{
+            responsive:true,
+            maintainAspectRatio:false,
+            plugins:{legend:{display:false}}
+        }
+    });
+}
+
+function render(date){
+    const data = allData[date] || [];
+    const safeLimit = +document.getElementById('safeLimit').value || 2.0;
+    const warnLimit = +document.getElementById('warnLimit').value || 3.0;
+    const dangerLimit = +document.getElementById('dangerLimit').value || 10.0;
+    // ========== 关键修改4：设置顶部显示日期为默认日期 ==========
+    document.getElementById('show-date').innerText = date;
+
+    const maxCurr = Math.max(...data.map(x=>x.current||0));
+    const maxAcc = Math.max(...data.map(x=>x.accumulate||0));
+    const dangerSec = data.find(x=>x.accumulate===maxAcc)?.section || '-';
+
+    document.getElementById('c1').innerText = data.length;
+    document.getElementById('c2').innerText = maxCurr.toFixed(2)+' mm';
+    document.getElementById('c3').innerText = maxAcc.toFixed(2)+' mm';
+    document.getElementById('c4').innerText = dangerSec;
+    document.getElementById('alert').style.display = maxCurr >= warnLimit ? 'block' : 'none';
+
+    const labels = data.map(x=>x.section);
+    const currData = data.map(x=>x.current);
+    const accData = data.map(x=>x.accumulate);
+
+    if(chart1) chart1.destroy();
+    if(chart2) chart2.destroy();
+
+    chart1 = new Chart(document.getElementById('chart1'),{
+        type:'line', data:{labels,datasets:[{label:'累计(mm)',data:accData,borderColor:'#e74c3c',fill:false}]},
+        options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}}}
+    });
+
+    chart2 = new Chart(document.getElementById('chart2'),{
+        type:'bar', data:{labels,datasets:[{label:'日变形(mm)',data:currData,backgroundColor:'#3498db'}]},
+        options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}}}
+    });
+
+    const tableData = data.map(item=>({
+        section:item.section, current:item.current, line:item.line, accumulate:item.accumulate,
+        level: item.current>=dangerLimit?'高危':item.current>=warnLimit?'预警':item.current<safeLimit?'安全':'正常'
+    }));
+
+    if(table) table.destroy();
+    table = new Tabulator('#table',{
+        data:tableData, layout:'fitColumns', height:'100%',
+        columns:[
+            {title:'断面',field:'section',width:140},
+            {title:'日变形(mm)',field:'current',width:120,sorter:'number'},
+            {title:'最大变形位置',field:'line',width:120},
+            {title:'累计变形(mm)',field:'accumulate',width:120,sorter:'number'},
+            {title:'等级',field:'level',width:90, formatter:cell=>{
+                const v=cell.getValue();
+                return v=='高危'||v=='预警'?`<span class='warn'>${v}</span>`:`<span class='safe'>${v}</span>`;
+            }}
+        ]
+    });
+
+    // 生成监测结论
+    generateConclusion(data);
+}
+
+// 获取阈值设置
+function getThresholds() {
+    return {
+        trend: parseInt(document.getElementById('trendThreshold').value) || 5,
+        warn: parseInt(document.getElementById('warnThreshold').value) || 10,
+        danger: parseInt(document.getElementById('dangerThreshold').value) || 15,
+        accWarn: parseInt(document.getElementById('accWarnThreshold').value) || 500,
+        accDanger: parseInt(document.getElementById('accDangerThreshold').value) || 700
+    };
+}
+
+// 生成监测结论
+function generateConclusion(data){
+    const thresholds = getThresholds();
+    
+    if(!data || data.length === 0){
+        document.getElementById('concl-1').innerHTML = '暂无监测数据';
+        document.getElementById('concl-2').innerHTML = '-';
+        document.getElementById('concl-3').innerHTML = '-';
+        return;
+    }
+
+    const maxAcc = Math.max(...data.map(x=>x.accumulate||0));
+    const maxCurr = Math.max(...data.map(x=>x.current||0));
+    const avgCurr = data.reduce((sum, x) => sum + (x.current||0), 0) / data.length;
+    
+    // 1. 总体状况
+    let status = '正常';
+    let statusColor = '#27ae60';
+    if(maxAcc >= thresholds.accDanger || maxCurr >= thresholds.danger){
+        status = '<span style="color:#e74c3c;font-weight:bold;">需重点关注</span>';
+        statusColor = '#e74c3c';
+    } else if(maxAcc >= thresholds.accWarn || maxCurr >= thresholds.warn){
+        status = '<span style="color:#f39c12;font-weight:bold;">基本稳定</span>';
+        statusColor = '#f39c12';
+    }
+    
+    document.getElementById('concl-1').innerHTML = `共监测 ${data.length} 个断面，整体状态${status}。最大累计变形 ${maxAcc.toFixed(2)}mm，最大日变形 ${maxCurr.toFixed(2)}mm，平均日变形 ${avgCurr.toFixed(2)}mm。`;
+
+    // 2. 重点关注断面
+    const highRisk = data.filter(x => x.accumulate >= thresholds.accWarn || x.current >= thresholds.warn);
+    if(highRisk.length === 0){
+        document.getElementById('concl-2').innerHTML = '无高风险断面';
+    } else {
+        highRisk.sort((a,b) => b.accumulate - a.accumulate);
+        const riskList = highRisk.slice(0, 3).map(x => 
+            `<span style="color:#e74c3c;">${x.section}</span>(${x.accumulate.toFixed(0)}mm)`
+        ).join('、');
+        document.getElementById('concl-2').innerHTML = `${riskList}（累计变形较大，建议加强监测频率）`;
+    }
+
+    // 3. 变形趋势
+    const risingSections = data.filter(x => x.current >= thresholds.trend);
+    if(risingSections.length === 0){
+        document.getElementById('concl-3').innerHTML = '各断面变形均处于可控范围内，无明显异常增长趋势。';
+    } else {
+        document.getElementById('concl-3').innerHTML = `<span style="color:#f39c12;">${risingSections.length}</span> 个断面日变形超过${thresholds.trend}mm，需关注后续变化趋势。`;
+    }
+}
+
+// 初始化断面下拉框
+function initSectionSelector(){
+    const sections = getAllSections();
+    
+    sectionSel.innerHTML = '';
+    
+    sections.forEach(s=>{
+        const opt = document.createElement('option');
+        opt.value = s;
+        opt.innerText = s;
+        sectionSel.appendChild(opt);
+    });
+    
+    // 默认选中第一个断面
+    sectionSel.selectedIndex = 0;
+    
+    // 绑定事件，同时更新两个图表
+    sectionSel.onchange = ()=>{
+        const section = sectionSel.value;
+        renderSectionChart(section);
+        renderSectionDayChart(section);
+    };
+    
+    if(sections.length>0){
+        renderSectionChart(sections[0]);
+        renderSectionDayChart(sections[0]);
+    }
+}
+
+
+
+// 事件绑定
+dateSel.onchange = ()=>{
+    const selectedDate = dateSel.value;
+    if (allData[selectedDate]) {
+        render(selectedDate);
+    } else {
+        // 如果所选日期没有数据，查找最近的有数据的日期
+        let closestDate = defaultDate;
+        let minDiff = Infinity;
+        for (const date of allDates) {
+            const diff = Math.abs(new Date(date) - new Date(selectedDate));
+            if (diff < minDiff) {
+                minDiff = diff;
+                closestDate = date;
+            }
+        }
+        dateSel.value = closestDate;
+        render(closestDate);
+    }
+};
+document.getElementById('safeLimit').onchange = ()=>render(dateSel.value);
+document.getElementById('warnLimit').onchange = ()=>render(dateSel.value);
+document.getElementById('dangerLimit').onchange = ()=>render(dateSel.value);
+document.getElementById('applyThreshold').addEventListener('click', function() {
+    generateConclusion(allData[dateSel.value]);
+});
+
+
+document.getElementById('export').onclick = ()=>{
+    const ws = XLSX.utils.json_to_sheet(table.getData());
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb,ws,'隧洞监测数据');
+    XLSX.writeFile(wb,`隧洞监测_${dateSel.value}.xlsx`);
+};
+
+document.getElementById('print').onclick = ()=>window.print();
+
+
+
+document.getElementById('full').onclick = ()=>{
+    if(!document.fullscreenElement) document.documentElement.requestFullscreen();
+    else document.exitFullscreen();
+};
+
+// 页面加载
+window.onload = ()=>{
+    // ========== 关键修改4：基于默认日期初始化渲染 ==========
+    render(defaultDate);
+    initSectionSelector();
+};
+</script>
+</body>
+</html>
